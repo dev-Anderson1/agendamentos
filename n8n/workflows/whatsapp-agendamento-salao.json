@@ -1,0 +1,121 @@
+{
+  "id": "8ChPNmM7sCiKfIF7",
+  "name": "WhatsApp — Agendamento Salão",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-salao",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-whatsapp",
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "whatsapp-salao"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://bot-api:3000/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "chamar-bot",
+      "name": "Chamar Bot API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-reply",
+              "leftValue": "={{ $json.resposta }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "tem-resposta",
+      "name": "Tem resposta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $('Webhook WhatsApp').first().json;\nconst body = root.body ?? root;\nconst data = body.data ?? body;\nconst key = data.key ?? {};\nconst remoteJid = String(key.remoteJid || '');\nconst telefone = remoteJid.replace('@s.whatsapp.net','').replace('@lid','').replace(/\\D/g,'');\nconst instance = body.instance || body.instanceName || $json.instance || 'salao2';\nreturn [{\n  json: {\n    telefone: $json.telefone || telefone,\n    instance,\n    resposta: $json.resposta\n  }\n}];"
+      },
+      "id": "preparar-envio",
+      "name": "Preparar Envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://evolution-api:8080/message/sendText/' + ($json.instance || 'salao2') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "salao_evolution_key" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.telefone }}\",\n  \"text\": {{ JSON.stringify($json.resposta) }}\n}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "enviar-whatsapp",
+      "name": "Responder no WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 220],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp": {
+      "main": [[{ "node": "Chamar Bot API", "type": "main", "index": 0 }]]
+    },
+    "Chamar Bot API": {
+      "main": [[{ "node": "Tem resposta?", "type": "main", "index": 0 }]]
+    },
+    "Tem resposta?": {
+      "main": [
+        [{ "node": "Preparar Envio", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Preparar Envio": {
+      "main": [[{ "node": "Responder no WhatsApp", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": true }
+}

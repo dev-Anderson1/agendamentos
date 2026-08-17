@@ -1,0 +1,133 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: salao_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-salao}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-salao_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-salao}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-salao} -d ${POSTGRES_DB:-salao}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - salao_net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: salao_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - salao_net
+
+  bot-api:
+    build: ./bot-api
+    container_name: salao_bot_api
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-salao}:${POSTGRES_PASSWORD:-salao_secret}@postgres:5432/${POSTGRES_DB:-salao}
+      TZ: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+      AI_API_KEY: ${AI_API_KEY:-ollama}
+      AI_BASE_URL: ${AI_BASE_URL:-http://ollama:11434/v1}
+      AI_MODEL: ${AI_MODEL:-llama3.2:3b}
+      AI_FORCE_CLASSIC: ${AI_FORCE_CLASSIC:-0}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      # Evolution: webhook recebe e o bot responde via sendText (sem n8n)
+      EVOLUTION_SERVER_URL_INTERNAL: http://evolution-api:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-salao_evolution_key}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-salao2}
+      OWNER_PIN: ${OWNER_PIN:-1234}
+      OWNER_NOTIFY_PHONE: ${OWNER_NOTIFY_PHONE:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3001/oauth/google/callback}
+      GOOGLE_CALENDAR_EMAIL: ${GOOGLE_CALENDAR_EMAIL:-andiscipulo@gmail.com}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
+    ports:
+      - "${BOT_API_PORT:-3001}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - salao_net
+
+  # WhatsApp via Evolution API (não oficial / QR Code)
+  # Ideal para MVP local. Em produção, avalie Meta Cloud API.
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: salao_evolution
+    restart: unless-stopped
+    ports:
+      - "${EVOLUTION_PORT:-8080}:8080"
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    # Entrypoint original ignora Cmd; forçamos patch do os.release (WSL quebra o QR)
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - ". ./Docker/scripts/deploy_database.sh && node --require /evolution/patch-os.js dist/main.js"
+    environment:
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:8080}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-salao_evolution_key}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-salao}:${POSTGRES_PASSWORD:-salao_secret}@postgres:5432/${POSTGRES_DB:-salao}?schema=evolution
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      LOG_LEVEL: ERROR,WARN,DEBUG,INFO
+      DEL_INSTANCE: "false"
+      # Nome simples (sem acento) — evita rejeição no pareamento Baileys
+      CONFIG_SESSION_PHONE_CLIENT: EvolutionAPI
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      # vazio = busca versão dinâmica do WhatsApp Web
+      CONFIG_SESSION_PHONE_VERSION: ""
+      QRCODE_LIMIT: 30
+      QRCODE_COLOR: "#000000"
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      # Webhook por instância aponta para o bot-api (sem n8n)
+      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_URL:-http://bot-api:3000/webhook/whatsapp}
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+    volumes:
+      - evolution_instances:/evolution/instances
+      - ./evolution/patch-os.js:/evolution/patch-os.js:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bot-api:
+        condition: service_started
+    networks:
+      - salao_net
+
+volumes:
+  postgres_data:
+  evolution_instances:
+  ollama_data:
+
+networks:
+  salao_net:
+    driver: bridge

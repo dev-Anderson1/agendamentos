@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Agenda · Studio Erika Thebas</title>
+  <style>
+    :root {
+      --bg: #f4eee7;
+      --card: #fffcf8;
+      --ink: #241c16;
+      --muted: #74665a;
+      --line: #e4d8cc;
+      --accent: #7c3140;
+      --accent-hover: #642636;
+      --ok: #2c6a4d;
+      --shadow: 0 18px 50px rgba(36, 28, 22, 0.16);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.15rem 1.25rem 0.9rem;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: rgba(244, 238, 231, 0.94);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { font-size: 1.2rem; font-weight: 650; margin: 0 0 0.2rem; letter-spacing: -0.02em; }
+    p.sub { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    main { padding: 1rem 1.25rem 3rem; max-width: 680px; margin: 0 auto; }
+    .tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.2rem 0 1rem; }
+    button {
+      font: inherit;
+      border: 0;
+      border-radius: 999px;
+      padding: 0.48rem 0.9rem;
+      background: #ebe2d8;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(0.97); }
+    button:disabled { opacity: 0.55; cursor: wait; }
+    button.active { background: var(--accent); color: #fff; }
+    button.primary { background: var(--accent); color: #fff; border-radius: 12px; }
+    button.primary:hover { background: var(--accent-hover); }
+    button.danger { background: var(--accent); color: #fff; border-radius: 12px; }
+    button.ghost { background: #ebe2d8; border-radius: 12px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1rem 1.05rem;
+      margin-bottom: 0.75rem;
+    }
+    .quando { font-weight: 700; font-size: 1.02rem; }
+    .meta { color: var(--muted); font-size: 0.92rem; margin-top: 0.28rem; }
+    .acoes { display: flex; gap: 0.5rem; margin-top: 0.9rem; flex-wrap: wrap; }
+    .acoes button { flex: 1; min-width: 150px; padding: 0.65rem 0.75rem; }
+    input, textarea {
+      width: 100%;
+      font: inherit;
+      padding: 0.75rem 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+    }
+    input:focus, textarea:focus {
+      outline: 2px solid rgba(124, 49, 64, 0.28);
+      border-color: var(--accent);
+    }
+    textarea { min-height: 110px; resize: vertical; line-height: 1.45; }
+    .toast {
+      min-height: 1.2rem;
+      margin: 0 0 0.9rem;
+      font-size: 0.92rem;
+      color: var(--ok);
+    }
+    .toast.erro { color: var(--accent); }
+    .vazio { color: var(--muted); padding: 2rem 0; text-align: center; }
+    .login { max-width: 380px; margin: 12vh auto 0; padding: 0 1.25rem; }
+    .login .card { padding: 1.4rem 1.3rem 1.5rem; }
+    .login h1 { margin-bottom: 0.35rem; }
+    .login label { display: block; margin: 1.1rem 0 0.4rem; font-size: 0.88rem; color: var(--muted); }
+    .login button { width: 100%; margin-top: 1rem; padding: 0.8rem; }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(28, 20, 16, 0.42);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 8vh 1rem 2rem;
+      z-index: 40;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      width: min(440px, 100%);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 1.25rem 1.25rem 1.15rem;
+      transform: translateY(-18px);
+      opacity: 0;
+      animation: modalIn 0.22s ease forwards;
+    }
+    @keyframes modalIn {
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .modal h2 { margin: 0 0 0.35rem; font-size: 1.12rem; }
+    .modal .detalhe {
+      background: #f7f1ea;
+      border-radius: 12px;
+      padding: 0.75rem 0.85rem;
+      margin: 0.85rem 0 1rem;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+    .modal .detalhe strong { color: var(--ink); font-weight: 650; }
+    .modal-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      justify-content: flex-end;
+    }
+    .modal-actions button { min-width: 108px; padding: 0.62rem 0.9rem; }
+    .aviso-label { display: block; margin: 0 0 0.4rem; font-size: 0.88rem; color: var(--muted); }
+    .modal-status { min-height: 1.1rem; margin: 0.65rem 0 0; font-size: 0.88rem; color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div id="login" class="login">
+    <div class="card">
+      <h1>Agenda do studio</h1>
+      <p class="sub">Studio Erika Thebas. Acesso só da dona — no computador, sem outro celular.</p>
+      <label for="pin">PIN de acesso</label>
+      <input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code" />
+      <button type="button" class="primary" id="entrar">Entrar</button>
+      <p id="loginMsg" class="toast erro"></p>
+    </div>
+  </div>
+
+  <div id="app" hidden>
+    <header>
+      <h1>Agenda do studio</h1>
+      <p class="sub">Horários gravados no sistema</p>
+    </header>
+    <main>
+      <div class="tabs">
+        <button data-periodo="hoje" class="active">Hoje</button>
+        <button data-periodo="amanha">Amanhã</button>
+        <button data-periodo="semana">7 dias</button>
+        <button data-periodo="futuros">Futuros</button>
+        <button type="button" id="atualizar">Atualizar</button>
+      </div>
+      <p id="titulo" class="sub"></p>
+      <p id="toast" class="toast"></p>
+      <div id="lista"></div>
+    </main>
+  </div>
+
+  <div id="overlay" class="overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
+      <h2 id="modalTitulo"></h2>
+      <p id="modalSub" class="sub"></p>
+      <div id="modalDetalhe" class="detalhe"></div>
+      <div id="modalCampo" hidden>
+        <label class="aviso-label" for="avisoTexto">Mensagem para a cliente</label>
+        <textarea id="avisoTexto" placeholder="Escreva o aviso com clareza…"></textarea>
+      </div>
+      <p id="modalStatus" class="modal-status"></p>
+      <div class="modal-actions">
+        <button type="button" class="ghost" id="modalCancelar">Voltar</button>
+        <button type="button" class="primary" id="modalConfirmar"></button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const pinKey = 'salao_owner_pin';
+    let periodo = 'hoje';
+    let itens = [];
+    let modalAcao = null;
+    let modalItem = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function pin() {
+      return sessionStorage.getItem(pinKey) || '';
+    }
+
+    function esc(s) {
+      return String(s || '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function setToast(texto, erro = false) {
+      const el = $('toast');
+      el.textContent = texto || '';
+      el.className = erro ? 'toast erro' : 'toast';
+    }
+
+    async function api(url, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', 'x-owner-pin': pin(), ...(opts.headers || {}) };
+      const res = await fetch(url, { ...opts, headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.erro || 'Não foi possível concluir.');
+      return data;
+    }
+
+    function fecharModal() {
+      modalAcao = null;
+      modalItem = null;
+      $('overlay').classList.remove('open');
+      $('overlay').hidden = true;
+      $('modalStatus').textContent = '';
+      $('avisoTexto').value = '';
+      $('modalConfirmar').disabled = false;
+    }
+
+    function abrirModal({ acao, item }) {
+      modalAcao = acao;
+      modalItem = item;
+      $('modalStatus').textContent = '';
+      $('modalDetalhe').innerHTML =
+        `<strong>${esc(item.quando)}–${esc(item.fim)}</strong><br>` +
+        `${esc(item.servico)} com ${esc(item.profissional)}<br>` +
+        `${esc(item.cliente_nome)} · #${esc(item.id)}`;
+
+      if (acao === 'avisar') {
+        $('modalTitulo').textContent = 'Avisar cancelamento';
+        $('modalSub').textContent = 'O WhatsApp leva o seu texto e, em seguida, horários livres do sistema para ela remarcar.';
+        $('modalCampo').hidden = false;
+        $('modalConfirmar').textContent = 'Enviar no WhatsApp';
+        $('avisoTexto').value =
+          `Olá, ${item.cliente_nome}! Infelizmente precisamos cancelar seu horário de ${item.quando} (${item.servico}) no Studio Erika Thebas.`;
+      } else {
+        $('modalTitulo').textContent = 'Cancelar horário';
+        $('modalSub').textContent = 'Vamos cancelar no sistema e enviar horários livres reais para ela remarcar.';
+        $('modalCampo').hidden = true;
+        $('modalConfirmar').textContent = 'Cancelar e avisar';
+      }
+
+      $('overlay').hidden = false;
+      $('overlay').classList.add('open');
+      if (acao === 'avisar') $('avisoTexto').focus();
+    }
+
+    async function carregar() {
+      setToast('');
+      const data = await api('/admin/agenda?periodo=' + encodeURIComponent(periodo));
+      $('titulo').textContent = data.titulo || '';
+      itens = data.itens || [];
+      if (!itens.length) {
+        $('lista').innerHTML = '<p class="vazio">Nenhum horário neste período.</p>';
+        return;
+      }
+      $('lista').innerHTML = itens.map((a) => `
+        <article class="card">
+          <div class="quando">${esc(a.quando)}–${esc(a.fim)}</div>
+          <div class="meta">${esc(a.servico)} · ${esc(a.profissional)}</div>
+          <div class="meta">${esc(a.cliente_nome)} · #${esc(a.id)}</div>
+          <div class="acoes">
+            <button class="ghost" data-acao="avisar" data-id="${esc(a.id)}">Avisar no WhatsApp</button>
+            <button class="danger" data-acao="cancelar" data-id="${esc(a.id)}">Cancelar e oferecer remarcação</button>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    async function confirmarModal() {
+      if (!modalItem || !modalAcao) return;
+      const btn = $('modalConfirmar');
+      btn.disabled = true;
+      $('modalStatus').textContent = '';
+      try {
+        if (modalAcao === 'avisar') {
+          const texto = $('avisoTexto').value.trim();
+          if (!texto) {
+            $('modalStatus').textContent = 'Escreva o aviso antes de enviar.';
+            btn.disabled = false;
+            return;
+          }
+          const nome = modalItem.cliente_nome;
+          const r = await api('/admin/avisar', {
+            method: 'POST',
+            body: JSON.stringify({
+              id: Number(modalItem.id),
+              telefone: modalItem.cliente_telefone,
+              texto,
+            }),
+          });
+          fecharModal();
+          setToast(r.mensagem || ('Aviso enviado para ' + nome + ' com horários para remarcar.'));
+          return;
+        }
+        const r = await api('/admin/cancelar-remarcar', {
+          method: 'POST',
+          body: JSON.stringify({ id: Number(modalItem.id) }),
+        });
+        fecharModal();
+        setToast(r.mensagem || 'Horário cancelado.');
+        await carregar();
+      } catch (err) {
+        $('modalStatus').textContent = err.message || 'Não deu certo. Tente de novo.';
+        btn.disabled = false;
+      }
+    }
+
+    $('entrar').onclick = async () => {
+      sessionStorage.setItem(pinKey, $('pin').value.trim());
+      try {
+        await carregar();
+        $('login').hidden = true;
+        $('app').hidden = false;
+      } catch {
+        $('loginMsg').textContent = 'PIN incorreto.';
+        sessionStorage.removeItem(pinKey);
+      }
+    };
+
+    $('pin').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('entrar').click();
+    });
+
+    document.querySelectorAll('.tabs [data-periodo]').forEach((btn) => {
+      btn.onclick = async () => {
+        periodo = btn.dataset.periodo;
+        document.querySelectorAll('.tabs [data-periodo]').forEach((b) => b.classList.toggle('active', b === btn));
+        await carregar();
+      };
+    });
+
+    $('atualizar').onclick = () => carregar();
+
+    $('lista').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-acao]');
+      if (!btn) return;
+      const item = itens.find((a) => String(a.id) === String(btn.dataset.id));
+      if (!item) return;
+      abrirModal({ acao: btn.dataset.acao, item });
+    });
+
+    $('modalCancelar').onclick = fecharModal;
+    $('modalConfirmar').onclick = confirmarModal;
+    $('overlay').addEventListener('click', (ev) => {
+      if (ev.target === $('overlay')) fecharModal();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && $('overlay').classList.contains('open')) fecharModal();
+    });
+
+    if (pin()) {
+      carregar().then(() => {
+        $('login').hidden = true;
+        $('app').hidden = false;
+      }).catch(() => sessionStorage.removeItem(pinKey));
+    }
+  </script>
+</body>
+</html>
