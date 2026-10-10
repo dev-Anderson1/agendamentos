@@ -25,6 +25,15 @@ async function chaveSessaoCliente(telefone) {
 }
 
 async function setSession(telefone, estado, dados = {}) {
+  const atual = await query(
+    `SELECT dados FROM salao.conversas WHERE telefone = $1`,
+    [telefone],
+  );
+  const prev = atual.rows[0]?.dados || {};
+  const merged = { ...dados };
+  if (prev.lgpd_aviso_em && !merged.lgpd_aviso_em) {
+    merged.lgpd_aviso_em = prev.lgpd_aviso_em;
+  }
   await query(
     `INSERT INTO salao.conversas (telefone, estado, dados, atualizado_em)
      VALUES ($1, $2, $3::jsonb, NOW())
@@ -32,7 +41,7 @@ async function setSession(telefone, estado, dados = {}) {
        SET estado = EXCLUDED.estado,
            dados = EXCLUDED.dados,
            atualizado_em = NOW()`,
-    [telefone, estado, JSON.stringify(dados)],
+    [telefone, estado, JSON.stringify(merged)],
   );
 }
 

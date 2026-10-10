@@ -2,6 +2,7 @@ import { query } from './db.js';
 import { buscarConhecimento, formatarContextoRag } from './rag.js';
 import { sincronizarNovoAgendamento, cancelarEventoGoogle } from './google-calendar.js';
 import { avisarDonoNovoAgendamento } from './admin.js';
+import { criarPagamentoPendente } from './pagamentos.js';
 import { prepararRemarcacao } from './remarcar.js';
 import { formatDiaBr, listarHorariosLivres, parseDia, parseDiaHoraNatural } from './slots.js';
 
@@ -404,6 +405,7 @@ export async function executeTool(name, args = {}, context = {}) {
         inicioLocal: row.inicio_local,
         fimLocal: row.fim_local,
       });
+      await criarPagamentoPendente(row.id, servico.id);
       await avisarDonoNovoAgendamento({
         id: row.id,
         cliente: args.cliente_nome,

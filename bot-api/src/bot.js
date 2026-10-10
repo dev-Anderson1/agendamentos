@@ -4,6 +4,7 @@ import { query } from './db.js';
 import { detectarPerguntaFaq } from './faq.js';
 import { buscarConhecimento } from './rag.js';
 import { sincronizarNovoAgendamento, cancelarEventoGoogle } from './google-calendar.js';
+import { criarPagamentoPendente } from './pagamentos.js';
 import {
   avisarClientes,
   avisarDonoNovoAgendamento,
@@ -111,6 +112,54 @@ function onlyDigits(v) {
   return String(v || '').replace(/\D/g, '');
 }
 
+// Converte número por extenso em dígito (voz transcrita: "um" → 1, "dois" → 2...)
+const NUMEROS_EXTENSO = {
+  um: 1, uma: 1, primeiro: 1, primeira: 1, 'numero um': 1, 'opcao um': 1, 'opcao 1': 1,
+  dois: 2, duas: 2, segundo: 2, segunda: 2, 'numero dois': 2, 'opcao dois': 2, 'opcao 2': 2,
+  tres: 3, terceiro: 3, terceira: 3, 'numero tres': 3, 'opcao tres': 3, 'opcao 3': 3,
+  quatro: 4, quarto: 4, quarta: 4, 'opcao 4': 4,
+  cinco: 5, quinto: 5, quinta: 5, 'opcao 5': 5,
+  seis: 6, sexto: 6, 'opcao 6': 6,
+  sete: 7, setimo: 7, 'opcao 7': 7,
+  oito: 8, 'opcao 8': 8,
+  nove: 9, 'opcao 9': 9,
+  dez: 10, 'opcao 10': 10,
+};
+
+function parseNumeroOpcao(texto) {
+  const t = normalizeTxtVoz(texto);
+  // dígito direto: "1", "2", " 1 "
+  const digito = t.match(/^\s*(\d+)\s*$/);
+  if (digito) return Number(digito[1]);
+  // número extraído de frase: "quero a 2", "opção 1", "número 2"
+  const emFrase = t.match(/\b(?:opcao|numero|opc[aã]o|n[uú]mero)\s+(\d+)\b/);
+  if (emFrase) return Number(emFrase[1]);
+  const digEx = t.match(/\b(\d+)\b/);
+  if (digEx) return Number(digEx[1]);
+  // extenso
+  for (const [palavra, num] of Object.entries(NUMEROS_EXTENSO)) {
+    if (t === palavra || t.startsWith(palavra + ' ') || t.endsWith(' ' + palavra) || t.includes(' ' + palavra + ' ')) {
+      return num;
+    }
+  }
+  return NaN;
+}
+
+// Tenta achar um item numa lista pelo nome (para voz: "Ana Paula" → índice 0)
+function matchNome(lista, textoVoz, campoNome = 'nome') {
+  const t = normalizeTxt(textoVoz);
+  if (!t) return -1;
+  // match exato
+  let idx = lista.findIndex((item) => normalizeTxt(item[campoNome]) === t);
+  if (idx >= 0) return idx;
+  // match parcial
+  idx = lista.findIndex((item) => {
+    const nome = normalizeTxt(item[campoNome]);
+    return nome.includes(t) || t.includes(nome.split(' ')[0]);
+  });
+  return idx;
+}
+
 function phoneTail(telefone) {
   const d = onlyDigits(telefone);
   return d.slice(-8);
@@ -131,6 +180,16 @@ async function getSession(telefone) {
 }
 
 async function setSession(telefone, estado, dados = {}) {
+  // preserva aceite LGPD se existir na sessão atual
+  const atual = await query(
+    `SELECT dados FROM salao.conversas WHERE telefone = $1`,
+    [telefone],
+  );
+  const prev = atual.rows[0]?.dados || {};
+  const merged = { ...dados };
+  if (prev.lgpd_aviso_em && !merged.lgpd_aviso_em) {
+    merged.lgpd_aviso_em = prev.lgpd_aviso_em;
+  }
   await query(
     `INSERT INTO salao.conversas (telefone, estado, dados, atualizado_em)
      VALUES ($1, $2, $3::jsonb, NOW())
@@ -138,7 +197,7 @@ async function setSession(telefone, estado, dados = {}) {
        SET estado = EXCLUDED.estado,
            dados = EXCLUDED.dados,
            atualizado_em = NOW()`,
-    [telefone, estado, JSON.stringify(dados)],
+    [telefone, estado, JSON.stringify(merged)],
   );
 }
 
@@ -372,6 +431,14 @@ async function responderPerguntaFaq({ faq, telefone, instance }) {
   };
 }
 
+function studioEndereco() {
+  return process.env.STUDIO_ADDRESS || '';
+}
+
+function studioMapsUrl() {
+  return process.env.STUDIO_MAPS_URL || '';
+}
+
 async function textoInfos() {
   const equipe = await query(
     `SELECT nome, COALESCE(cargo, '') AS cargo
@@ -382,6 +449,20 @@ async function textoInfos() {
   const linhasEquipe = equipe.rows.map((p) =>
     p.cargo ? `• ${p.nome} — ${p.cargo}` : `• ${p.nome}`,
   );
+
+  const endereco = studioEndereco();
+  const mapsUrl = studioMapsUrl();
+  const linhasEndereco = [];
+  if (endereco) {
+    linhasEndereco.push(`📍 *${endereco}*`);
+  }
+  if (mapsUrl) {
+    linhasEndereco.push(`🗺️ Como chegar: ${mapsUrl}`);
+  }
+  if (!linhasEndereco.length) {
+    linhasEndereco.push('Endereço: me pergunte e te passo!');
+  }
+
   return [
     '*Horário e informações*',
     '',
@@ -399,8 +480,10 @@ async function textoInfos() {
     '*Equipe:*',
     ...(linhasEquipe.length ? linhasEquipe : ['• Consulte pelo WhatsApp']),
     '',
-    '*Endereço / estacionamento / formas de pagamento:*',
-    'Posso confirmar esses detalhes com a recepção do studio — me diga o que precisa (PIX, cartão, como chegar...).',
+    '*Endereço:*',
+    ...linhasEndereco,
+    '',
+    '*Formas de pagamento:* PIX, débito e crédito.',
     '',
     'Digite *2* para agendar ou *menu* para voltar.',
   ].join('\n');
@@ -558,14 +641,29 @@ function normalizeTxt(v = '') {
     .trim();
 }
 
+// Versão para voz: remove pontuação que o Whisper injeta ("Sim." → "sim")
+function normalizeTxtVoz(v = '') {
+  return String(v)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[.,!?;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function respostaPositiva(texto) {
-  return /^(quero|sim|quero sim|pode|pode sim|pode ser|mostra|mostrar|vamos|por favor)$/.test(
-    normalizeTxt(texto),
-  );
+  const t = normalizeTxtVoz(texto);
+  // match exato
+  if (/^(quero|sim|quero sim|pode|pode sim|pode ser|mostra|mostrar|vamos|por favor|confirmo|confirmar|correto|certo|isso|ok|claro|combinado)$/.test(t)) return true;
+  // palavra-chave dentro de frase longa (ex: "Confirma pra mim? Sim")
+  return /\b(sim|confirmo|pode confirmar|isso mesmo|correto|certo|pode ser|quero sim)\b/.test(t);
 }
 
 function respostaNegativa(texto) {
-  return /^(nao|agora nao|so queria saber)$/.test(normalizeTxt(texto));
+  const t = normalizeTxtVoz(texto);
+  if (/^(nao|agora nao|so queria saber|cancelar|desistir|nao quero)$/.test(t)) return true;
+  return /\b(nao quero|cancelar|desistir)\b/.test(t);
 }
 
 function pedidoCorteGenerico(texto, servicoNome) {
@@ -1299,6 +1397,38 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
     .normalize('NFD')
     .replace(/\p{M}/gu, '');
 
+  // LGPD: aviso na primeira conversa (clientes; não dono/profissional)
+  const profGate = await findProfissionalByTelefone(telefone);
+  if (!isDonoIntent(raw) && !profGate) {
+    const {
+      precisaAvisoPrivacidade,
+      mensagemAvisoPrivacidade,
+      marcarAvisoPrivacidadeAceito,
+    } = await import('./lgpd/titular.js');
+    if (await precisaAvisoPrivacidade(telefone)) {
+      const aceitou = [
+        'ok',
+        'okay',
+        'aceito',
+        'aceitar',
+        'sim',
+        'concordo',
+        'beleza',
+        'pode',
+        'li e aceito',
+      ].includes(lower);
+      if (!aceitou) {
+        return { resposta: mensagemAvisoPrivacidade(), instance, telefone };
+      }
+      await marcarAvisoPrivacidadeAceito(telefone, { resposta: raw || 'aceito' });
+      return {
+        resposta: ['Perfeito, obrigada!', '', menu({ pushName })].join('\n'),
+        instance,
+        telefone,
+      };
+    }
+  }
+
   if (!raw) {
     const profAuto = await findProfissionalByTelefone(telefone);
     if (profAuto) {
@@ -1916,10 +2046,19 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
   }
 
   if (estado === 'agendar_profissional') {
-    const n = Number(lower);
     const profissionais = dados.profissionais || [];
     const qualquer = profissionais.length + 1;
-    if (!Number.isInteger(n) || n < 1 || n > qualquer) {
+    let n = parseNumeroOpcao(raw);
+    // tenta match por nome se não veio número
+    if (isNaN(n) || n < 1 || n > qualquer) {
+      const idxNome = matchNome(profissionais, raw);
+      if (idxNome >= 0) n = idxNome + 1;
+    }
+    // "qualquer", "tanto faz", "qualquer um", "pode ser qualquer"
+    if (isNaN(n) && /qualquer|tanto faz|pode ser|nao importa|nao tenho preferencia/.test(normalizeTxt(raw))) {
+      n = qualquer;
+    }
+    if (isNaN(n) || n < 1 || n > qualquer) {
       const desvio = await tratarCorrecaoServico({
         telefone,
         texto: raw,
@@ -1927,12 +2066,19 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
         dados,
       });
       if (desvio) return desvio;
+      const linhas = profissionais.map((p, i) =>
+        p.cargo ? `${i + 1} - ${p.nome} (${p.cargo})` : `${i + 1} - ${p.nome}`,
+      );
       return {
         resposta: [
           dados.servico?.nome
             ? `Ainda estamos no *${dados.servico.nome}*.`
             : 'Ainda estamos no agendamento.',
-          'Digite o *número* do profissional, ou me corrija o serviço (ex: *corte masculino*).',
+          'Pode dizer o *nome* ou o *número* da profissional:',
+          '',
+          ...linhas,
+          `${qualquer} - Qualquer profissional`,
+          '',
           'Ou *menu* para voltar.',
         ].join('\n'),
         instance,
@@ -2144,7 +2290,7 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
   }
 
   if (estado === 'agendar_confirmar_datahora') {
-    if (lower === '1' || lower === 'sim') {
+    if (parseNumeroOpcao(raw) === 1 || respostaPositiva(raw)) {
       const slot = await encontrarSlotExato({
         dataIso: dados.dataIso,
         hora: dados.horaPedida,
@@ -2257,10 +2403,17 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
       return await seguirParaNome(telefone, dados, pushName, instance);
     }
 
-    const n = Number(lower);
-    if (!Number.isInteger(n) || n < 1 || n > slots.length) {
+    const n = parseNumeroOpcao(raw);
+    if (isNaN(n) || n < 1 || n > slots.length) {
+      const linhas = slots.slice(0, 12).map((s, i) => `${i + 1} - ${s.label}`);
       return {
-        resposta: 'Digite o *número* do horário da lista (ou tipo *10h*).\nOu *menu* para voltar.',
+        resposta: [
+          'Pode falar o *número* ou o *horário* (ex: "dez horas", "14h30"):',
+          '',
+          ...linhas,
+          '',
+          'Ou *menu* para voltar.',
+        ].join('\n'),
         instance,
         telefone,
       };
@@ -2276,7 +2429,8 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
   }
 
   if (estado === 'agendar_nome') {
-    if (lower === '1') {
+    const nOpcao = parseNumeroOpcao(raw);
+    if (nOpcao === 1 || respostaPositiva(raw)) {
       dados.clienteNome = dados.nomeSugestao;
       await setSession(telefone, 'agendar_confirmar', dados);
       return {
@@ -2284,7 +2438,7 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
         instance,
       };
     }
-    if (lower === '2') {
+    if (nOpcao === 2 || respostaNegativa(raw) || /outro nome|meu nome e|me chamo/.test(normalizeTxt(raw))) {
       await setSession(telefone, 'agendar_nome_texto', dados);
       return { resposta: 'Digite seu *nome*:', instance };
     }
@@ -2304,7 +2458,7 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
   }
 
   if (estado === 'agendar_confirmar') {
-    if (lower === '1' || lower === 'sim') {
+    if (parseNumeroOpcao(raw) === 1 || respostaPositiva(raw)) {
       try {
         const criado = await criarAgendamento({
           telefone,
@@ -2348,7 +2502,7 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
         };
       }
     }
-    if (lower === '2' || lower === 'nao' || lower === 'não') {
+    if (parseNumeroOpcao(raw) === 2 || respostaNegativa(raw)) {
       await clearSession(telefone);
       return {
         resposta: 'Agendamento cancelado.\nDigite *2* para tentar de novo ou *menu*.',
@@ -2356,7 +2510,7 @@ export async function handleMessage({ telefone, texto, pushName = '', instance =
       };
     }
     return {
-      resposta: 'Digite *1* para confirmar ou *2* para desistir.',
+      resposta: 'Pode falar *sim* para confirmar ou *não* para desistir.',
       instance,
     };
   }
@@ -2638,6 +2792,7 @@ async function criarAgendamento({
     inicioLocal: row.inicio_local,
     fimLocal: row.fim_local,
   });
+  await criarPagamentoPendente(row.id, servicoId);
   await avisarDonoNovoAgendamento({
     id: row.id,
     cliente: nome,

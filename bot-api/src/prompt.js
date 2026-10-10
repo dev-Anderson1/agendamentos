@@ -1,5 +1,13 @@
+function studioInfo() {
+  const parts = [];
+  if (process.env.STUDIO_ADDRESS) parts.push(`Endereço: ${process.env.STUDIO_ADDRESS}`);
+  if (process.env.STUDIO_MAPS_URL) parts.push(`Link Google Maps: ${process.env.STUDIO_MAPS_URL}`);
+  return parts.join('\n');
+}
+
 export function buildSystemPrompt({ pushName = '' } = {}) {
   const cliente = pushName ? `O cliente parece se chamar ${pushName}. Use o nome com naturalidade quando fizer sentido.` : '';
+  const info = studioInfo();
 
   return `Você é a assistente virtual do *Studio Erika Thebas*. Você atende pelo WhatsApp como uma recepcionista experiente: humana, simpática, profissional e resolutiva — nunca como um robô de menu.
 
@@ -90,6 +98,7 @@ Exemplos: "quero marcar", "marca pra mim amanhã às 15h"
 - Feriados: sujeito à disponibilidade
 - Fora do horário: acréscimo de 30%
 - Preferência: agendar com cerca de 2h de antecedência
+${info ? `\n## Localização do studio\n${info}` : ''}
 
 ## Fora do escopo
 Reclamação grave, financeiro complexo ou algo que você não resolve com as tools: diga com simpatia que vai encaminhar para um atendente humano.

@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import express from 'express';
@@ -11,7 +11,8 @@ import {
 } from './intent-flags.js';
 import { classifyIntent } from './classifier.js';
 import { pool } from './db.js';
-import { sendWhatsAppText } from './evolution.js';
+import { sendWhatsAppText, downloadMediaBase64, sendWhatsAppLocation } from './evolution.js';
+import { isWhisperEnabled, transcribeAudioBase64 } from './whisper.js';
 import { registrarMensagem } from './history.js';
 import {
   googleAuthUrl,
@@ -31,6 +32,13 @@ import {
   ownerPin,
 } from './admin.js';
 import { enviarAvisoComRemarcacao, prepararRemarcacao } from './remarcar.js';
+import { registerPainelRoutes } from './painel/routes.js';
+import { ensurePainelSchema } from './painel/migrate.js';
+import {
+  ensureLgpdSchema,
+  limparMensagensAntigas,
+  textoPoliticaHtml,
+} from './lgpd/titular.js';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -50,6 +58,7 @@ app.get('/health', async (_req, res) => {
       ok: true,
       agent: isAgentEnabled(),
       model: process.env.AI_MODEL || null,
+      whisper: isWhisperEnabled(),
       rag: { conhecimento },
       google_calendar: await googleCalendarPronto(),
       evolution: Boolean(
@@ -123,6 +132,20 @@ function adminAutorizado(req) {
 app.get(['/admin', '/admin/'], (_req, res) => {
   res.type('html').send(readFileSync(join(__dirname, 'admin.html'), 'utf8'));
 });
+
+app.get(['/privacidade', '/privacidade/'], (_req, res) => {
+  res.type('html').send(textoPoliticaHtml());
+});
+
+const painelDir = join(__dirname, 'public', 'painel');
+if (existsSync(painelDir)) {
+  app.use('/painel', express.static(painelDir, { index: 'index.html' }));
+  app.get('/painel/*', (_req, res) => {
+    res.sendFile(join(painelDir, 'index.html'));
+  });
+}
+
+registerPainelRoutes(app);
 
 app.get('/admin/agenda', async (req, res) => {
   if (!adminAutorizado(req)) return res.status(401).json({ erro: 'pin_invalido' });
@@ -255,6 +278,10 @@ function extractFromEvolution(body) {
     message.listResponseMessage?.title ||
     '';
 
+  // Detecta mensagem de áudio/voz para transcrição posterior
+  const audioMessage = message.audioMessage || message.pttMessage || null;
+  const isAudio = Boolean(audioMessage && !texto);
+
   const telefone = clienteJid
     .replace('@s.whatsapp.net', '')
     .replace('@lid', '')
@@ -278,6 +305,8 @@ function extractFromEvolution(body) {
     instance,
     pushName,
     event,
+    isAudio,
+    audioRawData: isAudio ? { key, message } : null,
   };
 }
 
@@ -317,9 +346,19 @@ async function processChat({ telefone, texto, pushName = '', instance = 'salao2'
 
   const forceClassic = String(process.env.AI_FORCE_CLASSIC || '') === '1';
 
+  // LGPD: primeira conversa sempre pelo fluxo clássico (aviso de privacidade)
+  let precisaLgpd = false;
+  try {
+    const { precisaAvisoPrivacidade } = await import('./lgpd/titular.js');
+    precisaLgpd = !isEquipeIntent(texto) && (await precisaAvisoPrivacidade(telefone));
+  } catch {
+    precisaLgpd = false;
+  }
+
   let result;
   if (
     forceClassic ||
+    precisaLgpd ||
     !isAgentEnabled() ||
     isEquipeIntent(texto) ||
     isShortcutClassic(texto) ||
@@ -445,14 +484,50 @@ async function handleEvolutionWebhook(req, res) {
 
   try {
     const parsed = extractFromEvolution(req.body || {});
-    const { fromMe, isGroup, texto, telefone, instance, pushName, event } = parsed;
+    let { fromMe, isGroup, texto, telefone, instance, pushName, event, isAudio, audioRawData } = parsed;
 
     if (event && event.includes('connection')) {
       console.log(`[webhook] connection event instance=${instance}`);
       return;
     }
 
-    if (fromMe || isGroup || !telefone || !texto) {
+    if (fromMe || isGroup || !telefone) return;
+
+    console.log(`[webhook] tel=${telefone} isAudio=${isAudio} whisper=${isWhisperEnabled()} texto="${texto.slice(0,60)}"`);
+
+    // Transcrição de áudio
+    if (isAudio && audioRawData && isWhisperEnabled()) {
+      try {
+        const base64 = await downloadMediaBase64({ instance, messageData: audioRawData });
+        if (base64) {
+          const transcricao = await transcribeAudioBase64(base64, {
+            mimeType: 'audio/ogg',
+            filename: 'audio.ogg',
+          });
+          if (transcricao) {
+            // Whisper sempre adiciona ponto final — remove pontuação isolada no fim
+            const limpo = transcricao.replace(/[.,!?;:]+\s*$/, '').trim();
+            console.log(`[whisper] ${telefone}: "${limpo}"`);
+            texto = limpo;
+          } else {
+            console.warn('[whisper] transcricao retornou vazia');
+          }
+        } else {
+          console.warn('[whisper] downloadMediaBase64 retornou null');
+        }
+      } catch (err) {
+        console.warn('[whisper] falhou, ignorando áudio:', err.message);
+      }
+    }
+
+    if (!texto) {
+      if (isAudio && !isWhisperEnabled()) {
+        await sendWhatsAppText({
+          instance,
+          telefone,
+          texto: 'Recebi seu áudio 🎙️, mas ainda não consigo ouvi-lo aqui. Pode digitar o que precisa?',
+        });
+      }
       return;
     }
 
@@ -464,6 +539,21 @@ async function handleEvolutionWebhook(req, res) {
       telefone: result.telefone || telefone,
       texto: result.resposta,
     });
+
+    // Envia pin de localização quando a resposta mencionar endereço/localização
+    const lat = parseFloat(process.env.STUDIO_LATITUDE || '');
+    const lng = parseFloat(process.env.STUDIO_LONGITUDE || '');
+    const mencionouEndereco = /endere[çc]o|localiza|onde fica|como chegar|maps|mapa/i.test(result.resposta);
+    if (lat && lng && mencionouEndereco) {
+      sendWhatsAppLocation({
+        instance: result.instance || instance,
+        telefone: result.telefone || telefone,
+        latitude: lat,
+        longitude: lng,
+        name: process.env.STUDIO_NOME || 'Studio',
+        address: process.env.STUDIO_ADDRESS || '',
+      }).catch((err) => console.warn('[location] falhou:', err.message));
+    }
   } catch (err) {
     console.error('[webhook] erro:', err.message || err);
   }
@@ -475,7 +565,17 @@ app.post('/webhook/whatsapp-salao', handleEvolutionWebhook);
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
   console.log(
-    `bot-api listening on :${port} | agent=${isAgentEnabled()} | webhook=/webhook/whatsapp | agenda=/admin`,
+    `bot-api listening on :${port} | agent=${isAgentEnabled()} | webhook=/webhook/whatsapp | painel=/painel | privacidade=/privacidade`,
   );
   ensureRagReady().catch((e) => console.warn('[rag] ready:', e.message));
+  ensurePainelSchema().catch((e) => console.warn('[painel] schema:', e.message));
+  ensureLgpdSchema()
+    .then(async () => {
+      const dias = Number(process.env.LGPD_RETENCAO_DIAS) || 180;
+      if (String(process.env.LGPD_RETENCAO_AUTO || '1') === '1') {
+        const r = await limparMensagensAntigas({ dias });
+        if (r.removidas) console.log(`[lgpd] retenção: ${r.removidas} mensagens > ${dias}d removidas`);
+      }
+    })
+    .catch((e) => console.warn('[lgpd] schema:', e.message));
 });

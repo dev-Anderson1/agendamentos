@@ -1,6 +1,7 @@
 import { query } from './db.js';
 import { sendWhatsAppText } from './evolution.js';
 import { cancelarEventoGoogle } from './google-calendar.js';
+import { cancelarPagamentoAgendamento } from './pagamentos.js';
 
 export function ownerPin() {
   return String(process.env.OWNER_PIN || '1234');
@@ -31,7 +32,7 @@ export async function avisarDonoNovoAgendamento({
     `Cliente: ${cliente}`,
     telefoneCliente ? `WhatsApp: ${telefoneCliente}` : null,
     '',
-    'Isso já está na agenda do sistema. Abra a agenda no computador: http://localhost:3001/admin',
+    'Isso já está na agenda do sistema. Painel: http://localhost:3001/painel',
   ]
     .filter(Boolean)
     .join('\n');
@@ -94,7 +95,7 @@ export function menuDono() {
   ].join('\n');
 }
 
-export async function listarAgendaSalao(periodo = 'hoje') {
+export async function listarAgendaSalao(periodo = 'hoje', { profissionalId = null } = {}) {
   let filtroData = `(a.inicio_em AT TIME ZONE 'America/Sao_Paulo')::date = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date`;
   let titulo = 'Agenda de hoje (todas as profissionais)';
 
@@ -108,6 +109,14 @@ export async function listarAgendaSalao(periodo = 'hoje') {
   } else if (periodo === 'futuros' || periodo === 'todos') {
     filtroData = `a.inicio_em >= NOW()`;
     titulo = 'Todos os horários futuros';
+  }
+
+  const params = [];
+  let filtroProf = '';
+  if (profissionalId) {
+    params.push(Number(profissionalId));
+    filtroProf = ` AND a.profissional_id = $${params.length}`;
+    titulo = `${titulo} (só o seu perfil)`;
   }
 
   const { rows } = await query(
@@ -126,8 +135,10 @@ export async function listarAgendaSalao(periodo = 'hoje') {
      LEFT JOIN salao.profissionais p ON p.id = a.profissional_id
      WHERE a.status IN ('confirmado', 'pendente')
        AND ${filtroData}
+       ${filtroProf}
      ORDER BY a.inicio_em ASC
      LIMIT 40`,
+    params,
   );
   return { titulo, itens: rows };
 }
@@ -268,6 +279,7 @@ export async function cancelarHorarioEAvisar({ id, instance = 'salao2', textoAvi
   );
   const row = r.rows[0];
   if (!row) return { ok: false, erro: 'nao_encontrado' };
+  await cancelarPagamentoAgendamento(id);
   await cancelarEventoGoogle(row.google_event_id);
   if (!enviarAviso) {
     return { ok: true, avisado: false, horario: row };

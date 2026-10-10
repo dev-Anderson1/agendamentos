@@ -32,7 +32,9 @@ services:
       - salao_net
 
   bot-api:
-    build: ./bot-api
+    build:
+      context: .
+      dockerfile: bot-api/Dockerfile
     container_name: salao_bot_api
     restart: unless-stopped
     environment:
@@ -50,7 +52,17 @@ services:
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-salao_evolution_key}
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-salao2}
       OWNER_PIN: ${OWNER_PIN:-1234}
+      FUNCIONARIO_PIN_DEFAULT: ${FUNCIONARIO_PIN_DEFAULT:-1234}
       OWNER_NOTIFY_PHONE: ${OWNER_NOTIFY_PHONE:-}
+      PAINEL_TOKEN_SECRET: ${PAINEL_TOKEN_SECRET:-troque_secret_painel_forte}
+      PAINEL_PUBLIC_URL: ${PAINEL_PUBLIC_URL:-http://localhost:3001/painel}
+      STUDIO_NOME: ${STUDIO_NOME:-Studio Erika Thebas}
+      STUDIO_ADDRESS: ${STUDIO_ADDRESS:-}
+      STUDIO_MAPS_URL: ${STUDIO_MAPS_URL:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LGPD_RETENCAO_DIAS: ${LGPD_RETENCAO_DIAS:-180}
+      LGPD_RETENCAO_AUTO: ${LGPD_RETENCAO_AUTO:-1}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}

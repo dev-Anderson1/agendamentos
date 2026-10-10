@@ -17,7 +17,7 @@ export function isPedidoOperacional(texto = '') {
     return false;
   }
 
-  return /\b(quero (agendar|marcar|remarcar)|gostaria de agendar|quero marcar|agendar|marcar (um )?horario|marcar pra|tem horario|tem vaga|horario livre|disponib|meu(s)? horario|cancelar meu|desmarcar meu|cancela o|quero um horario|remarcar|desmarcar)\b/.test(
+  return /\b(quero (agendar|marcar|remarcar|fazer)|gostaria de (agendar|marcar|fazer)|quero marcar|agendar|agendamento|marcar (um )?horario|marcar pra|tem horario|tem vaga|horario livre|disponib|meu(s)? horario|cancelar meu|desmarcar meu|cancela o|quero um horario|remarcar|desmarcar|fazer (o|um) agendamento|fazer agendamento)\b/.test(
     t,
   );
 }

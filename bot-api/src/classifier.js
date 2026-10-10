@@ -349,6 +349,7 @@ export function classifyIntentRules(texto = '') {
       'quero agendar',
       'gostaria de agendar',
       'gostaria de marcar',
+      'gostaria de fazer',
       'pode marcar',
       'da pra marcar',
       'da para marcar',
@@ -356,8 +357,12 @@ export function classifyIntentRules(texto = '') {
       'marcar um',
       'marcar uma',
       'agendar',
+      'agendamento',
       'faz um horario',
       'faz um agendamento',
+      'fazer um agendamento',
+      'fazer o agendamento',
+      'fazer agendamento',
       'marca ai',
       'marca aí',
       'marca um horario',
@@ -368,34 +373,9 @@ export function classifyIntentRules(texto = '') {
       'vou querer agendar',
       'quero fazer',
     ]) ||
-    /^marca(r)?\b/.test(t) ||
-    (t.includes('quero fazer') && (servico || t.includes('marcar')))
+    /^marca(r)?\b/.test(t)
   ) {
-    // "quero fazer X" sem marcar → se só serviço, ainda trata como agendar (fluxo natural)
-    if (t.includes('quero fazer') && servico && !hasAny(t, ['quanto', 'preco', 'custa'])) {
-      return { intencao: 'agendar', servico, data };
-    }
-    if (
-      hasAny(t, [
-        'quero marcar',
-        'quero agendar',
-        'gostaria de agendar',
-        'gostaria de marcar',
-        'pode marcar',
-        'da pra marcar',
-        'tem como marcar',
-        'agendar',
-        'marca ai',
-        'marca um',
-        'consegue me encaixar',
-        'me encaixa',
-        'me encaixar',
-        'vou querer agendar',
-      ]) ||
-      /^marca(r)?\b/.test(t)
-    ) {
-      return { intencao: 'agendar', servico, data };
-    }
+    return { intencao: 'agendar', servico, data };
   }
 
   // --- ver disponibilidade ---

@@ -84,6 +84,19 @@ async function callLLM(messages, { useTools = true } = {}) {
     throw new Error(`AI API ${resp.status}: ${text.slice(0, 400)}`);
   }
   const data = await resp.json();
+  const usage = data.usage || {};
+  if (usage.prompt_tokens || usage.completion_tokens) {
+    import('./painel/consumo.js')
+      .then(({ registrarUsoOpenai }) =>
+        registrarUsoOpenai({
+          promptTokens: usage.prompt_tokens || 0,
+          completionTokens: usage.completion_tokens || 0,
+          modelo: model,
+          metadados: { origem: 'agent' },
+        }),
+      )
+      .catch((err) => console.warn('[consumo] openai:', err.message));
+  }
   return data.choices?.[0]?.message;
 }
 

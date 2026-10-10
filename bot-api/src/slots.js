@@ -48,7 +48,9 @@ function normalizeText(texto) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
-    .replace(/\s+/g, ' ');
+    .replace(/[.,!?;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function agoraSp() {
@@ -72,9 +74,45 @@ function nextWeekdayIso(targetDow, horaHHMM = null) {
   return toDateKey(d);
 }
 
+// Horas por extenso (voz transcrita sem número)
+const HORA_EXTENSO = {
+  uma: 1, 'uma hora': 1, 'uma da tarde': 13, 'uma da manha': 1,
+  duas: 2, 'duas horas': 2, 'duas da tarde': 14, 'duas da manha': 2,
+  tres: 3, 'tres horas': 3, 'tres da tarde': 15, 'tres da manha': 3,
+  quatro: 4, 'quatro horas': 4, 'quatro da tarde': 16, 'quatro da manha': 4,
+  cinco: 5, 'cinco horas': 5, 'cinco da tarde': 17, 'cinco da manha': 5,
+  seis: 6, 'seis horas': 6, 'seis da tarde': 18, 'seis da manha': 6,
+  sete: 7, 'sete horas': 7, 'sete da manha': 7,
+  oito: 8, 'oito horas': 8, 'oito da manha': 8,
+  nove: 9, 'nove horas': 9, 'nove da manha': 9,
+  dez: 10, 'dez horas': 10, 'dez da manha': 10,
+  onze: 11, 'onze horas': 11, 'onze da manha': 11,
+  meio: 12, 'doze horas': 12, 'meio dia': 12,
+  treze: 13, 'uma da tarde': 13,
+  quatorze: 14, 'duas da tarde': 14,
+  quinze: 15, 'tres da tarde': 15,
+  dezesseis: 16, 'quatro da tarde': 16,
+  dezessete: 17, 'cinco da tarde': 17,
+  dezoito: 18, 'seis da tarde': 18,
+};
+
 function parseHoraNatural(t) {
+  // "dez e meia", "dez e quinze", "duas e meia da tarde"
+  const eMeia = t.match(/\b(\w+)\s+e\s+(meia|quinze|vinte|trinta|quarenta|quarenta e cinco)\b(?:\s+(?:da\s+)?(tarde|manha|noite))?/);
+  if (eMeia) {
+    const base = HORA_EXTENSO[eMeia[1]] ?? HORA_EXTENSO[`${eMeia[1]} horas`];
+    if (base !== undefined) {
+      const minMap = { meia: 30, quinze: 15, vinte: 20, trinta: 30, 'quarenta': 40, 'quarenta e cinco': 45 };
+      const mm = minMap[eMeia[2]] ?? 0;
+      let hh = base;
+      if (eMeia[3] === 'tarde' && hh < 12) hh += 12;
+      if (eMeia[3] === 'noite' && hh < 18) hh += 12;
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+  }
+
   // 10:30 | 10h30 | 10h | as 10 | às 10 horas
-  let m = t.match(/(?:(?:as|a)\s*)?(\d{1,2})[:h](\d{2})(?:\s*h(?:oras)?)?/);
+  let m = t.match(/(?:(?:as|a)\s*)?(\d{1,2})[:h](\d{2})(?:\s*h(?:oras?)?)?/);
   if (m) {
     const hh = Number(m[1]);
     const mm = Number(m[2]);
@@ -83,7 +121,7 @@ function parseHoraNatural(t) {
     }
   }
 
-  m = t.match(/(?:(?:as|a)\s*)?(\d{1,2})\s*h(?:oras)?(?:\s*(\d{2}))?/);
+  m = t.match(/(?:(?:as|a)\s*)?(\d{1,2})\s*h(?:oras?)?(?:\s*(\d{2}))?/);
   if (m) {
     const hh = Number(m[1]);
     const mm = m[2] !== undefined ? Number(m[2]) : 0;
@@ -97,6 +135,34 @@ function parseHoraNatural(t) {
     const hh = Number(m[1]);
     if (hh >= 0 && hh <= 23) {
       return `${String(hh).padStart(2, '0')}:00`;
+    }
+  }
+
+  // hora por extenso: "dez horas", "às dez da manhã", "duas da tarde"
+  // prefixo de turno: tarde → +12 se < 7
+  const tardeManha = t.match(/\b(\w+)\s+(?:da\s+)?(tarde|manha|noite)\b/);
+  if (tardeManha) {
+    const palavra = tardeManha[1];
+    const turno = tardeManha[2];
+    const horaBase = HORA_EXTENSO[palavra] ?? HORA_EXTENSO[`${palavra} horas`];
+    if (horaBase !== undefined) {
+      let hh = horaBase;
+      if (turno === 'tarde' && hh < 12) hh += 12;
+      if (turno === 'noite' && hh < 18) hh += 12;
+      return `${String(hh).padStart(2, '0')}:00`;
+    }
+  }
+  // extenso sem turno: "dez horas", "às dez"
+  const semTurno = t.match(/\b(?:as\s+)?(\w+)\s*(?:horas?)?\b/g);
+  if (semTurno) {
+    for (const frag of semTurno) {
+      const palavra = frag.replace(/\b(as|a|hora|horas)\b/g, '').trim();
+      let hh = HORA_EXTENSO[palavra];
+      // horas 1–6 sem turno → assume tarde (contexto de salão: 1h–6h vira 13h–18h)
+      if (hh !== undefined && hh >= 1 && hh <= 6) hh += 12;
+      if (hh !== undefined && hh >= 7 && hh <= 18) {
+        return `${String(hh).padStart(2, '0')}:00`;
+      }
     }
   }
 
@@ -116,8 +182,10 @@ export function parseDia(texto) {
   const t = normalizeText(texto);
   const sp = agoraSp();
 
-  if (t === 'hoje') return toDateKey(sp);
-  if (t === 'amanha') {
+  // aceita "hoje" em qualquer posição da frase
+  if (t === 'hoje' || /\bhoje\b/.test(t)) return toDateKey(sp);
+  // aceita "amanha" em qualquer posição ("pra amanha", "quero amanha de manha")
+  if (t === 'amanha' || /\bamanha\b/.test(t)) {
     const d = new Date(sp);
     d.setDate(d.getDate() + 1);
     return toDateKey(d);

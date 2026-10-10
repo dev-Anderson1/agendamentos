@@ -1,0 +1,118 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: salao_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-salao}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-salao_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-salao}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-salao} -d ${POSTGRES_DB:-salao}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - salao_net
+
+  bot-api:
+    build:
+      context: .
+      dockerfile: bot-api/Dockerfile
+    container_name: salao_bot_api
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-salao}:${POSTGRES_PASSWORD:-salao_secret}@postgres:5432/${POSTGRES_DB:-salao}
+      TZ: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+      AI_API_KEY: ${AI_API_KEY}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
+      AI_MODEL: ${AI_MODEL:-llama-3.1-8b-instant}
+      AI_FORCE_CLASSIC: ${AI_FORCE_CLASSIC:-0}
+      EVOLUTION_SERVER_URL_INTERNAL: http://evolution-api:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-salao2}
+      OWNER_PIN: ${OWNER_PIN:-1234}
+      FUNCIONARIO_PIN_DEFAULT: ${FUNCIONARIO_PIN_DEFAULT:-1234}
+      OWNER_NOTIFY_PHONE: ${OWNER_NOTIFY_PHONE:-}
+      PAINEL_TOKEN_SECRET: ${PAINEL_TOKEN_SECRET}
+      PAINEL_PUBLIC_URL: ${PAINEL_PUBLIC_URL}
+      STUDIO_NOME: ${STUDIO_NOME:-Studio Erika Thebas}
+      STUDIO_ADDRESS: ${STUDIO_ADDRESS:-}
+      STUDIO_MAPS_URL: ${STUDIO_MAPS_URL:-}
+      STUDIO_LATITUDE: ${STUDIO_LATITUDE:-}
+      STUDIO_LONGITUDE: ${STUDIO_LONGITUDE:-}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      LGPD_RETENCAO_DIAS: ${LGPD_RETENCAO_DIAS:-180}
+      LGPD_RETENCAO_AUTO: ${LGPD_RETENCAO_AUTO:-1}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      GOOGLE_CALENDAR_EMAIL: ${GOOGLE_CALENDAR_EMAIL:-}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - salao_net
+
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: salao_evolution
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    environment:
+      SERVER_URL: ${EVOLUTION_SERVER_URL}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-salao}:${POSTGRES_PASSWORD:-salao_secret}@postgres:5432/${POSTGRES_DB:-salao}?schema=evolution
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      LOG_LEVEL: ERROR,WARN
+      DEL_INSTANCE: "false"
+      CONFIG_SESSION_PHONE_CLIENT: EvolutionAPI
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      CONFIG_SESSION_PHONE_VERSION: ""
+      QRCODE_LIMIT: 30
+      QRCODE_COLOR: "#000000"
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_GLOBAL_URL: http://bot-api:3000/webhook/whatsapp
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+    volumes:
+      - evolution_instances:/evolution/instances
+      - ./evolution/patch-os.js:/evolution/patch-os.js:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bot-api:
+        condition: service_started
+    networks:
+      - salao_net
+
+volumes:
+  postgres_data:
+  evolution_instances:
+
+networks:
+  salao_net:
+    driver: bridge
