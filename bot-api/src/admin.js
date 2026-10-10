@@ -32,7 +32,7 @@ export async function avisarDonoNovoAgendamento({
     `Cliente: ${cliente}`,
     telefoneCliente ? `WhatsApp: ${telefoneCliente}` : null,
     '',
-    'Isso já está na agenda do sistema. Painel: http://localhost:3001/painel',
+    `Isso já está na agenda do sistema. Painel: ${process.env.PAINEL_PUBLIC_URL || 'http://localhost:3001/painel'}`,
   ]
     .filter(Boolean)
     .join('\n');

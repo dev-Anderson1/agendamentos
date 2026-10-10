@@ -1,0 +1,24 @@
+name: Deploy para VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/salao
+            git fetch origin
+            git reset --hard origin/main
+            docker compose -f docker-compose.prod.yml build bot-api
+            docker compose -f docker-compose.prod.yml up -d bot-api
+            echo "Deploy concluído em $(date)"
