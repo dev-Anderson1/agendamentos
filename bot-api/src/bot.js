@@ -81,10 +81,13 @@ function menu({ saudacao = null, pushName = '' } = {}) {
   const nomePart = nome ? `, ${nome}` : '';
   const titulo = saudacao ? `${saudacao}${nomePart}!` : `Olá${nomePart}!`;
 
+  const endereco = process.env.STUDIO_ADDRESS ? `📍 ${process.env.STUDIO_ADDRESS}` : null;
+
   return [
     `${titulo} 😊`,
     '',
     'Aqui é do *Studio Erika Thebas*!',
+    endereco,
     '',
     'Pra te atender rapidinho, é só escolher uma das opções abaixo digitando o número:',
     '',
@@ -97,7 +100,7 @@ function menu({ saudacao = null, pushName = '' } = {}) {
     'A qualquer momento, digite *menu* para voltar aqui.',
     '',
     'Se preferir, também pode só me contar o que você precisa (tipo "quero marcar uma escova" ou "tem horário amanhã de manhã?") que eu já te ajudo.',
-  ].join('\n');
+  ].filter(v => v !== null).join('\n');
 }
 
 function formatPreco(servico) {
