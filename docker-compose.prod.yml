@@ -55,7 +55,7 @@ services:
       GOOGLE_CALENDAR_EMAIL: ${GOOGLE_CALENDAR_EMAIL:-}
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
     ports:
-      - "127.0.0.1:3001:3000"
+      - "3001:3000"
     depends_on:
       postgres:
         condition: service_healthy
